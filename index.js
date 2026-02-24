@@ -4,47 +4,49 @@ const app = express();
 app.use(express.json());
 
 app.post('/webhook', async (req, res) => {
-    // 1. Responder ao Mercado Pago que recebemos o sinal
     res.sendStatus(200);
 
-    // 2. Capturar o ID do pagamento
     const { body } = req;
-    const idPagamento = body.data?.id || body.id;
+    // Pega o ID de qualquer lugar que ele venha (data.id ou id direto)
+    const idPagamento = (body.data && body.data.id) ? body.data.id : body.id;
 
-    // Se for apenas um teste de conexão do MP, ignoramos
-    if (!idPagamento || body.action === 'opened') return;
+    // Ignora se não tiver ID ou se for apenas teste de abertura de link
+    if (!idPagamento || idPagamento === '123456789' || body.action === 'opened') {
+        console.log("Aviso de teste ou ID inválido recebido.");
+        return;
+    }
 
     try {
-        console.log(`Verificando pagamento: ${idPagamento}`);
+        console.log(`Consultando pagamento real: ${idPagamento}`);
 
-        // 3. Consultar o Mercado Pago para validar o pagamento
-        // Usamos o MP_ACCESS_TOKEN que você acabou de colocar no Render
+        // Tentativa de busca direta na API de Payments
         const response = await axios.get(`https://api.mercadopago.com/v1/payments/${idPagamento}`, {
-            headers: { 'Authorization': `Bearer ${process.env.MP_ACCESS_TOKEN}` }
+            headers: { 
+                'Authorization': `Bearer ${process.env.MP_ACCESS_TOKEN.trim()}`
+            }
         });
 
         const pagamento = response.data;
 
-        // 4. Se o pagamento estiver aprovado, pedimos a licença à Zaplink
         if (pagamento.status === 'approved') {
-            const emailCliente = pagamento.payer.email;
-            const nomeCliente = pagamento.payer.first_name || "Cliente";
-
-            console.log(`Pagamento Aprovado! Gerando licença para: ${emailCliente}`);
-
+            console.log(`Pagamento ${idPagamento} APROVADO.`);
+            
             await axios.post('https://control.zaplink.net/api/generate_license', {
                 token: process.env.ZAPLINK_TOKEN,
-                name: nomeCliente,
-                email: emailCliente,
-                product_id: "waoriginal" 
+                name: pagamento.payer.first_name || "Cliente",
+                email: pagamento.payer.email,
+                product_id: "waoriginal"
             });
-
-            console.log('Licença gerada com sucesso na Zaplink.');
+            
+            console.log(`Licença solicitada com sucesso para ${pagamento.payer.email}`);
+        } else {
+            console.log(`Pagamento encontrado, mas o status é: ${pagamento.status}`);
         }
+
     } catch (error) {
-        console.error('Erro ao processar webhook:', error.response?.data || error.message);
+        // Se der erro 404 aqui, é porque o ID enviado não é de um pagamento
+        console.error('Erro na consulta ao Mercado Pago:', error.response?.data?.message || error.message);
     }
 });
 
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`Servidor rodando na porta ${PORT}`));
+app.listen(process.env.PORT || 3000, () => console.log('Servidor rodando'));

@@ -36,7 +36,7 @@ app.post('/webhook', async (req, res) => {
                 token: process.env.ZAPLINK_TOKEN,
                 name: nomeCliente,
                 email: emailCliente,
-                product_id: "COLOQUE_AQUI_O_ID_DO_PRODUTO_ZAPLINK" 
+                product_id: "waoriginal" 
             });
 
             console.log('Licença gerada com sucesso na Zaplink.');

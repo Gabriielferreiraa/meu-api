@@ -29,18 +29,19 @@ app.post('/webhook', async (req, res) => {
         const pagamento = response.data;
 
         if (pagamento.status === 'approved') {
-            console.log(`Pagamento ${idPagamento} APROVADO.`);
+            console.log(`Pagamento ${idPagamento} APROVADO. Chamando Zaplink...`);
             
-            await axios.post('https://control.zaplink.net/api/generate_license', {
-                token: process.env.ZAPLINK_TOKEN,
-                name: pagamento.payer.first_name || "Cliente",
-                email: pagamento.payer.email,
-                product_id: "waoriginal"
-            });
-            
-            console.log(`Licença solicitada com sucesso para ${pagamento.payer.email}`);
-        } else {
-            console.log(`Pagamento encontrado, mas o status é: ${pagamento.status}`);
+            try {
+                const resZaplink = await axios.post('https://control.zaplink.net/api/generate_license', {
+                    token: process.env.ZAPLINK_TOKEN,
+                    name: pagamento.payer.first_name || "Cliente",
+                    email: pagamento.payer.email,
+                    product_id: "waoriginal" // Verifique se este ID está correto!
+                });
+                console.log('Resposta da Zaplink:', resZaplink.data);
+            } catch (zError) {
+                console.error('ERRO NA ZAPLINK:', zError.response?.data || zError.message);
+            }
         }
 
     } catch (error) {

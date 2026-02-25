@@ -29,14 +29,26 @@ app.post('/webhook', async (req, res) => {
         const pagamento = response.data;
 
         if (pagamento.status === 'approved') {
-            console.log(`Pagamento ${idPagamento} APROVADO. Chamando Zaplink...`);
-            
+            // Tentativas de encontrar o e-mail em diferentes lugares do pacote do MP
+            const emailCliente = pagamento.payer?.email || 
+                                 pagamento.external_reference || 
+                                 (pagamento.metadata && pagamento.metadata.email);
+
+            const nomeCliente = pagamento.payer?.first_name || "Cliente";
+
+            console.log(`Pagamento ${idPagamento} APROVADO. E-mail extraído: ${emailCliente}`);
+
+            if (!emailCliente || !emailCliente.includes('@')) {
+                console.error("ERRO: Não foi possível encontrar um e-mail válido para este pagamento.");
+                return;
+            }
+
             try {
                 const resZaplink = await axios.post('https://control.zaplink.net/api/generate_license', {
                     token: process.env.ZAPLINK_TOKEN,
-                    name: pagamento.payer.first_name || "Cliente",
-                    email: pagamento.payer.email,
-                    product_id: "waoriginal" // Verifique se este ID está correto!
+                    name: nomeCliente,
+                    email: emailCliente.trim(),
+                    product_id: "waoriginal"
                 });
                 console.log('Resposta da Zaplink:', resZaplink.data);
             } catch (zError) {

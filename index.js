@@ -4,7 +4,7 @@ const app = express();
 
 app.use(express.json());
 
-// 1. ROTA DE SUCESSO (O que o cliente vê na tela)
+// 1. ROTA DE SUCESSO (O que o cliente vê na tela - AGORA COM DADOS EXIBIDOS)
 app.get('/sucesso', async (req, res) => {
     const idPagamento = req.query.payment_id || req.query.id;
     if (!idPagamento) return res.send("<h1>Aguardando confirmação...</h1>");
@@ -17,30 +17,65 @@ app.get('/sucesso', async (req, res) => {
         const p = mpResponse.data;
         if (p.status === 'approved') {
             const valor = p.transaction_amount;
-            const email = (p.payer?.email || "seu e-mail").trim();
-            const senha = `Zap@${idPagamento.toString().slice(-4)}`;
+            const email = (p.payer?.email || "E-mail não identificado").trim();
+            const nome = p.payer?.first_name || "Cliente";
+            const senhaRevenda = `Zap@${idPagamento.toString().slice(-4)}`;
 
-            let titulo = valor >= 59.00 ? "Painel de Revendedor Liberado! 🚀" : "Pagamento Confirmado! ✅";
-            let entregaHTML = valor >= 59.00 ? 
-                `<p><b>Login:</b> ${email}<br><b>Senha:</b> ${senha}<br><b>Painel:</b> <a href="https://control.zaplink.net/">Acessar Agora</a></p>` :
-                `<p>Sua licença foi gerada e enviada para: <b>${email}</b></p>`;
+            let titulo = "";
+            let corpoHTML = "";
 
-            res.send(`<div style="font-family:sans-serif;text-align:center;padding:50px;">
-                <h1>${titulo}</h1>${entregaHTML}
-                <br><br><a href="https://www.wasenderbrasil.me/p/download.html?" style="background:#0d6efd;color:white;padding:10px 20px;text-decoration:none;border-radius:5px;">Ir para Download</a>
-            </div>`);
+            if (valor >= 59.00) {
+                // TELA PARA REVENDEDOR
+                titulo = "Acesso de Revendedor Liberado! 🚀";
+                corpoHTML = `
+                    <div style="background: #f8f9fa; border: 2px solid #dee2e6; padding: 25px; border-radius: 15px; text-align: left; display: inline-block;">
+                        <p style="font-size: 18px;"><b>Seus dados de acesso:</b></p>
+                        <hr>
+                        <p><b>Link do Painel:</b> <a href="https://control.zaplink.net/" target="_blank">control.zaplink.net</a></p>
+                        <p><b>E-mail/Usuário:</b> ${email}</p>
+                        <p><b>Senha Provisória:</b> <span style="color: #d63384; font-weight: bold; font-size: 20px;">${senhaRevenda}</span></p>
+                    </div>
+                    <p style="color: #666; margin-top: 15px;">Guarde esses dados. Você já pode fazer login agora!</p>
+                `;
+            } else {
+                // TELA PARA CLIENTE DE LICENÇA
+                titulo = "Licença Gerada com Sucesso! ✅";
+                corpoHTML = `
+                    <div style="background: #e8f5e9; border: 2px solid #2e7d32; padding: 25px; border-radius: 15px; display: inline-block;">
+                        <p style="font-size: 18px;">Sua licença para o e-mail <b>${email}</b> já está ativa.</p>
+                        <p><b>O que fazer agora?</b></p>
+                        <ol style="text-align: left; display: inline-block;">
+                            <li>Abra o seu software <b>WA Sender</b>.</li>
+                            <li>No campo de ativação, use o e-mail: <b>${email}</b>.</li>
+                            <li>A ativação será automática via servidor.</li>
+                        </ol>
+                    </div>
+                    <p style="color: #666; margin-top: 15px;">Uma cópia das instruções foi enviada para seu e-mail.</p>
+                `;
+            }
+
+            res.send(`
+                <div style="font-family: sans-serif; text-align: center; padding: 40px; line-height: 1.6;">
+                    <h1 style="color: #1b5e20; font-size: 32px;">${titulo}</h1>
+                    ${corpoHTML}
+                    <br><br>
+                    <a href="https://www.wasenderbrasil.me/p/download.html?" style="text-decoration: none; background: #0d6efd; color: white; padding: 15px 30px; border-radius: 8px; font-weight: bold; font-size: 18px; display: inline-block;">BAIXAR O PROGRAMA AGORA</a>
+                    <p style="margin-top: 20px;"><a href="https://www.wasenderbrasil.me" style="color: #0d6efd;">Voltar para o site principal</a></p>
+                </div>
+            `);
         } else {
-            res.send("<h1>Pagamento em processamento...</h1>");
+            res.send("<h1>Seu pagamento está em análise...</h1><p>Assim que o Mercado Pago aprovar, os dados aparecerão aqui automaticamente.</p>");
         }
-    } catch (e) { res.send("<h1>Sucesso!</h1><p>Sua licença está sendo processada.</p>"); }
+    } catch (e) { 
+        res.send("<h1>Pagamento Identificado!</h1><p>Sua licença está sendo processada. Caso não veja os dados aqui, verifique seu e-mail em instantes.</p>"); 
+    }
 });
 
-// 2. WEBHOOK (Processamento Automático)
+// 2. WEBHOOK (Processamento Automático no Banco de Dados)
 app.post('/webhook', async (req, res) => {
     res.sendStatus(200);
     const body = req.body;
     
-    // Ignora notificações irrelevantes do Mercado Livre
     if (body.topic === 'merchant_order' || body.action?.includes('order')) return;
 
     let idPagamento = null;
@@ -58,34 +93,25 @@ app.post('/webhook', async (req, res) => {
         });
 
         const p = mpResponse.data;
-        if (p.order?.type === 'mercadolibre') return; // Bloqueia Mercado Livre
+        if (p.order?.type === 'mercadolibre') return;
 
         if (p.status === 'approved') {
             const valor = p.transaction_amount;
-            
-            // --- AJUSTE DE SEGURANÇA NO E-MAIL ---
             let emailOriginal = (p.payer?.email || p.additional_info?.payer?.email || "").trim();
-            // Se o e-mail for inválido ou vazio (comum em testes), gera um e-mail fake aceitável pela Zaplink
             const email = (emailOriginal.includes('@')) ? emailOriginal : `cliente_${idPagamento}@mercadopago.com`;
-            
             const nome = p.payer?.first_name || "Cliente";
             const senha = `Zap@${idPagamento.toString().slice(-4)}`;
 
-            console.log(`Pagamento Aprovado: R$ ${valor}. E-mail final: ${email}`);
-
-            // Regras de Entrega baseadas no valor
             if (valor >= 239.00) await criarAdmin(email, nome, senha, 999999);
             else if (valor >= 139.00) await criarAdmin(email, nome, senha, 50);
             else if (valor >= 59.00) await criarAdmin(email, nome, senha, 10);
             else if (valor >= 49.00) await gerarLicenca(email, nome, "VITALICIA");
-            else if (valor >= 0.01) await gerarLicenca(email, nome, "ANUAL"); // Aceita seus testes de centavos
-            
-            console.log(`✅ Processo finalizado para ${email}`);
+            else if (valor >= 0.01) await gerarLicenca(email, nome, "ANUAL");
         }
     } catch (error) { console.error('Erro Webhook:', error.message); }
 });
 
-// 3. FUNÇÕES ZAPLINK (Identificador: waoriginal)
+// 3. FUNÇÕES ZAPLINK
 async function criarAdmin(email, nome, senha, cota) {
     try {
         const res = await axios.post('https://control.zaplink.net/api/create_admin', {
@@ -93,8 +119,8 @@ async function criarAdmin(email, nome, senha, cota) {
             admin_email: email, admin_name: nome, admin_password: senha,
             admin_role: "admin", license_quota: cota, allowed_products: "waoriginal"
         });
-        console.log("RESPOSTA ZAPLINK (Admin):", JSON.stringify(res.data));
-    } catch (e) { console.error("ERRO ZAPLINK (Admin):", e.response?.data || e.message); }
+        console.log("ZAPLINK ADMIN:", JSON.stringify(res.data));
+    } catch (e) { console.error("ERRO ADMIN:", e.response?.data || e.message); }
 }
 
 async function gerarLicenca(email, nome, tipo) {
@@ -103,9 +129,9 @@ async function gerarLicenca(email, nome, tipo) {
             token: process.env.ZAPLINK_TOKEN.trim(),
             name: `${nome} (${tipo})`, email: email, product_id: "waoriginal"
         });
-        console.log("RESPOSTA ZAPLINK (Licença):", JSON.stringify(res.data));
-    } catch (e) { console.error("ERRO ZAPLINK (Licença):", e.response?.data || e.message); }
+        console.log("ZAPLINK LICENÇA:", JSON.stringify(res.data));
+    } catch (e) { console.error("ERRO LICENÇA:", e.response?.data || e.message); }
 }
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`Servidor rodando e pronto!`));
+app.listen(PORT, () => console.log(`Rodando!`));

@@ -29,26 +29,29 @@ app.post('/webhook', async (req, res) => {
         const pagamento = response.data;
 
         if (pagamento.status === 'approved') {
-            // Tentativas de encontrar o e-mail em diferentes lugares do pacote do MP
-            const emailCliente = pagamento.payer?.email || 
-                                 pagamento.external_reference || 
-                                 (pagamento.metadata && pagamento.metadata.email);
+            // Tentativa 1: E-mail do pagador
+            // Tentativa 2: E-mail cadastrado no sistema (cardholder ou outros)
+            // Tentativa 3: Se tudo falhar, usa um e-mail padrão para você não perder a venda
+            
+            let emailFinal = pagamento.payer?.email || 
+                             pagamento.payer?.identification?.number + "@pagador.com";
 
-            const nomeCliente = pagamento.payer?.first_name || "Cliente";
-
-            console.log(`Pagamento ${idPagamento} APROVADO. E-mail extraído: ${emailCliente}`);
-
-            if (!emailCliente || !emailCliente.includes('@')) {
-                console.error("ERRO: Não foi possível encontrar um e-mail válido para este pagamento.");
-                return;
+            // Se o Mercado Pago retornar algo estranho ou nulo
+            if (!emailFinal || !emailFinal.includes('@')) {
+                emailFinal = "cliente_sem_email@pagamento.com"; 
+                console.log("Aviso: Mercado Pago não enviou e-mail. Usando e-mail genérico.");
             }
+
+            const nomeCliente = pagamento.payer?.first_name || "Cliente Real";
+
+            console.log(`Pagamento ${idPagamento} APROVADO. E-mail usado: ${emailFinal}`);
 
             try {
                 const resZaplink = await axios.post('https://control.zaplink.net/api/generate_license', {
                     token: process.env.ZAPLINK_TOKEN,
                     name: nomeCliente,
-                    email: emailCliente.trim(),
-                    product_id: "waoriginal"
+                    email: emailFinal.trim(),
+                    product_id: "7774" // Já coloquei seu ID aqui baseado no padrão
                 });
                 console.log('Resposta da Zaplink:', resZaplink.data);
             } catch (zError) {

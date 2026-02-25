@@ -4,13 +4,14 @@ const app = express();
 
 app.use(express.json());
 
-// 1. ROTA DE SUCESSO (Exibe a Chave Serial na Tela)
+// 1. ROTA DE SUCESSO (Busca e exibe a KEY)
 app.get('/sucesso', async (req, res) => {
     const idPagamento = req.query.payment_id || req.query.id;
-    if (!idPagamento) return res.send("<h1>Aguardando confirmação do pagamento...</h1>");
+    if (!idPagamento) return res.send("<h1>Aguardando confirmação...</h1>");
 
     try {
-        // 1. Busca detalhes no Mercado Pago
+        console.log(`[SUCESSO] Cliente chegou na tela. ID: ${idPagamento}`);
+        
         const mpResponse = await axios.get(`https://api.mercadopago.com/v1/payments/${idPagamento}`, {
             headers: { 'Authorization': `Bearer ${process.env.MP_ACCESS_TOKEN.trim()}` }
         });
@@ -20,57 +21,64 @@ app.get('/sucesso', async (req, res) => {
             const email = (p.payer?.email || "").trim();
             const valor = p.transaction_amount;
 
-            // Se for Revendedor (valor alto), mostramos os dados de login
             if (valor >= 59.00) {
                 const senha = `Zap@${idPagamento.toString().slice(-4)}`;
+                return res.send(`<div style="font-family:sans-serif;text-align:center;padding:50px;">
+                    <h1>Painel de Revendedor!</h1>
+                    <p>Login: ${email}<br>Senha: ${senha}</p>
+                    <a href="https://control.zaplink.net/">Acessar Painel</a></div>`);
+            }
+
+            console.log(`[SUCESSO] Buscando licença para o e-mail: ${email}`);
+            
+            // Espera 3 segundos para o webhook terminar de processar
+            await new Promise(resolve => setTimeout(resolve, 3000));
+
+            // TENTATIVA DE BUSCAR A LICENÇA
+            const zapResponse = await axios.post('https://control.zaplink.net/api/get_license', {
+                token: process.env.ZAPLINK_TOKEN.trim(),
+                email: email
+            }).catch(e => {
+                console.log("Erro ao chamar get_license:", e.response?.data || e.message);
+                return { data: {} };
+            });
+
+            console.log("Resposta da Zaplink na Busca:", JSON.stringify(zapResponse.data));
+
+            // Algumas APIs retornam 'license' ou 'license_key' ou dentro de um array
+            const licenseKey = zapResponse.data?.license_key || zapResponse.data?.license || "Aguardando ativação...";
+
+            if (licenseKey === "Aguardando ativação...") {
                 return res.send(`
                     <div style="font-family:sans-serif;text-align:center;padding:50px;">
-                        <h1 style="color:#198754;">Painel de Revendedor Liberado!</h1>
-                        <div style="background:#f8f9fa;padding:20px;border-radius:10px;display:inline-block;border:1px solid #ddd;">
-                            <p><b>Login:</b> ${email}</p>
-                            <p><b>Senha:</b> ${senha}</p>
-                            <p><b>Painel:</b> <a href="https://control.zaplink.net/">Acessar Agora</a></p>
-                        </div>
+                        <h1>Sua chave está sendo gerada...</h1>
+                        <p>Isso leva alguns segundos. Por favor, <b>atualize a página (F5)</b> em instantes.</p>
+                        <button onclick="location.reload()" style="padding:10px 20px; cursor:pointer;">ATUALIZAR PÁGINA</button>
                     </div>
                 `);
             }
 
-            // Se for Licença, buscamos a KEY na Zaplink pelo e-mail
-            // Adicionamos um pequeno delay de 2 segundos para dar tempo do webhook processar
-            await new Promise(resolve => setTimeout(resolve, 2000));
-
-            const zapResponse = await axios.post('https://control.zaplink.net/api/get_license', {
-                token: process.env.ZAPLINK_TOKEN.trim(),
-                email: email
-            });
-
-            // Pega a chave da resposta da Zaplink
-            const licenseKey = zapResponse.data?.license_key || "Gerando chave... atualize a página";
-
             res.send(`
-                <div style="font-family:sans-serif;text-align:center;padding:50px;line-height:1.6;">
+                <div style="font-family:sans-serif;text-align:center;padding:50px;">
                     <h1 style="color:#198754;">Pagamento Aprovado! ✅</h1>
-                    <p style="font-size:18px;">Copie e cole sua chave de ativação abaixo:</p>
-                    
-                    <div style="background:#333;color:#00ff00;padding:20px;border-radius:10px;display:inline-block;font-family:monospace;font-size:24px;letter-spacing:2px;border:2px solid #000;margin:10px 0;">
+                    <p>Sua chave de ativação:</p>
+                    <div style="background:#222;color:#0f0;padding:20px;border-radius:10px;display:inline-block;font-family:monospace;font-size:22px;border:2px solid #000;">
                         <b>${licenseKey}</b>
                     </div>
-
-                    <p style="color:#666;">E-mail de ativação: <b>${email}</b></p>
-                    
-                    <br><br>
-                    <a href="https://www.wasenderbrasil.me/p/download.html?" style="background:#0d6efd;color:white;padding:12px 25px;text-decoration:none;border-radius:5px;font-weight:bold;">BAIXAR INSTALADOR</a>
+                    <p>E-mail: ${email}</p>
+                    <br><a href="https://www.wasenderbrasil.me/p/download.html?" style="background:#0d6efd;color:white;padding:12px 25px;text-decoration:none;border-radius:5px;font-weight:bold;">BAIXAR AGORA</a>
                 </div>
             `);
         } else {
-            res.send("<h1>Pagamento em análise...</h1><p>Assim que for aprovado, sua chave aparecerá aqui.</p>");
+            res.send("<h1>Pagamento em análise...</h1>");
         }
-    } catch (e) { 
-        res.send("<h1>Quase lá!</h1><p>Estamos gerando sua chave. Por favor, atualize a página em 10 segundos.</p>"); 
+    } catch (e) {
+        console.error("Erro na rota sucesso:", e.message);
+        res.send("<h1>Sucesso!</h1><p>Sua licença foi processada. Verifique seu e-mail.</p>");
     }
 });
 
-// 2. WEBHOOK (Cria a licença no sistema)
+// 2. WEBHOOK (Criação) - MANTIDO IGUAL
 app.post('/webhook', async (req, res) => {
     res.sendStatus(200);
     const body = req.body;
@@ -99,6 +107,8 @@ app.post('/webhook', async (req, res) => {
         const nome = p.payer?.first_name || "Cliente";
         const senha = `Zap@${idPagamento.toString().slice(-4)}`;
 
+        console.log(`[WEBHOOK] Criando licença para ${email}`);
+
         if (valor >= 239.00) await criarAdmin(email, nome, senha, 999999);
         else if (valor >= 139.00) await criarAdmin(email, nome, senha, 50);
         else if (valor >= 59.00) await criarAdmin(email, nome, senha, 10);
@@ -108,25 +118,27 @@ app.post('/webhook', async (req, res) => {
     } catch (error) { console.error('Erro Webhook:', error.message); }
 });
 
-// 3. FUNÇÕES ZAPLINK
+// FUNÇÕES ZAPLINK
 async function criarAdmin(email, nome, senha, cota) {
     try {
-        await axios.post('https://control.zaplink.net/api/create_admin', {
+        const res = await axios.post('https://control.zaplink.net/api/create_admin', {
             token: process.env.ZAPLINK_TOKEN.trim(),
             admin_email: email, admin_name: nome, admin_password: senha,
             admin_role: "admin", license_quota: cota, allowed_products: "waoriginal"
         });
+        console.log("ZAPLINK ADMIN:", res.data.message || "Criado");
     } catch (e) { console.error("Erro Admin"); }
 }
 
 async function gerarLicenca(email, nome, tipo) {
     try {
-        await axios.post('https://control.zaplink.net/api/generate_license', {
+        const res = await axios.post('https://control.zaplink.net/api/generate_license', {
             token: process.env.ZAPLINK_TOKEN.trim(),
             name: `${nome} (${tipo})`, email: email, product_id: "waoriginal"
         });
+        console.log("ZAPLINK LICENÇA:", res.data.message || "Criado");
     } catch (e) { console.error("Erro Licença"); }
 }
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`Sistema de Chaves Online!`));
+app.listen(PORT, () => console.log(`Sistema Online!`));

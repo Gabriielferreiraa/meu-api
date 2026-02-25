@@ -4,7 +4,7 @@ const app = express();
 
 app.use(express.json());
 
-// 1. ROTA DE SUCESSO (Página que o cliente vê)
+// 1. ROTA DE SUCESSO (O que o cliente vê na tela)
 app.get('/sucesso', async (req, res) => {
     const idPagamento = req.query.payment_id || req.query.id;
     if (!idPagamento) return res.send("<h1>Aguardando confirmação...</h1>");
@@ -32,15 +32,15 @@ app.get('/sucesso', async (req, res) => {
         } else {
             res.send("<h1>Pagamento em processamento...</h1>");
         }
-    } catch (e) { res.send("<h1>Sucesso!</h1><p>Verifique seu e-mail.</p>"); }
+    } catch (e) { res.send("<h1>Sucesso!</h1><p>Sua licença está sendo processada.</p>"); }
 });
 
-// 2. WEBHOOK (Processamento Silencioso)
+// 2. WEBHOOK (Processamento Automático)
 app.post('/webhook', async (req, res) => {
     res.sendStatus(200);
     const body = req.body;
     
-    // Filtro anti-Mercado Livre
+    // Ignora notificações irrelevantes do Mercado Livre
     if (body.topic === 'merchant_order' || body.action?.includes('order')) return;
 
     let idPagamento = null;
@@ -58,26 +58,34 @@ app.post('/webhook', async (req, res) => {
         });
 
         const p = mpResponse.data;
-        if (p.order?.type === 'mercadolibre') return; // Bloqueia ML
+        if (p.order?.type === 'mercadolibre') return; // Bloqueia Mercado Livre
 
         if (p.status === 'approved') {
             const valor = p.transaction_amount;
-            const email = (p.payer?.email || p.additional_info?.payer?.email || `cliente_${idPagamento}@mercadopago.com`).trim();
+            
+            // --- AJUSTE DE SEGURANÇA NO E-MAIL ---
+            let emailOriginal = (p.payer?.email || p.additional_info?.payer?.email || "").trim();
+            // Se o e-mail for inválido ou vazio (comum em testes), gera um e-mail fake aceitável pela Zaplink
+            const email = (emailOriginal.includes('@')) ? emailOriginal : `cliente_${idPagamento}@mercadopago.com`;
+            
             const nome = p.payer?.first_name || "Cliente";
             const senha = `Zap@${idPagamento.toString().slice(-4)}`;
 
-            console.log(`Pagamento Aprovado: R$ ${valor}. Enviando para Zaplink...`);
+            console.log(`Pagamento Aprovado: R$ ${valor}. E-mail final: ${email}`);
 
+            // Regras de Entrega baseadas no valor
             if (valor >= 239.00) await criarAdmin(email, nome, senha, 999999);
             else if (valor >= 139.00) await criarAdmin(email, nome, senha, 50);
             else if (valor >= 59.00) await criarAdmin(email, nome, senha, 10);
             else if (valor >= 49.00) await gerarLicenca(email, nome, "VITALICIA");
-            else if (valor >= 1.00) await gerarLicenca(email, nome, "ANUAL"); // R$ 1,00 para seus testes
+            else if (valor >= 0.01) await gerarLicenca(email, nome, "ANUAL"); // Aceita seus testes de centavos
+            
+            console.log(`✅ Processo finalizado para ${email}`);
         }
     } catch (error) { console.error('Erro Webhook:', error.message); }
 });
 
-// FUNÇÕES ZAPLINK (Identificador: waoriginal)
+// 3. FUNÇÕES ZAPLINK (Identificador: waoriginal)
 async function criarAdmin(email, nome, senha, cota) {
     try {
         const res = await axios.post('https://control.zaplink.net/api/create_admin', {
@@ -100,4 +108,4 @@ async function gerarLicenca(email, nome, tipo) {
 }
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`Servidor rodando!`));
+app.listen(PORT, () => console.log(`Servidor rodando e pronto!`));

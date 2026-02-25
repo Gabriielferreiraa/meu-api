@@ -4,84 +4,43 @@ const app = express();
 
 app.use(express.json());
 
-// 1. ROTA DE SUCESSO (Busca e exibe a KEY)
+// 1. ROTA DE SUCESSO (O que o cliente vê na tela)
 app.get('/sucesso', async (req, res) => {
     const idPagamento = req.query.payment_id || req.query.id;
     if (!idPagamento) return res.send("<h1>Aguardando confirmação...</h1>");
 
     try {
-        console.log(`[SUCESSO] Cliente chegou na tela. ID: ${idPagamento}`);
-        
         const mpResponse = await axios.get(`https://api.mercadopago.com/v1/payments/${idPagamento}`, {
             headers: { 'Authorization': `Bearer ${process.env.MP_ACCESS_TOKEN.trim()}` }
         });
 
         const p = mpResponse.data;
         if (p.status === 'approved') {
-            const email = (p.payer?.email || "").trim();
             const valor = p.transaction_amount;
+            const email = (p.payer?.email || "seu e-mail").trim();
+            const senha = `Zap@${idPagamento.toString().slice(-4)}`;
 
-            if (valor >= 59.00) {
-                const senha = `Zap@${idPagamento.toString().slice(-4)}`;
-                return res.send(`<div style="font-family:sans-serif;text-align:center;padding:50px;">
-                    <h1>Painel de Revendedor!</h1>
-                    <p>Login: ${email}<br>Senha: ${senha}</p>
-                    <a href="https://control.zaplink.net/">Acessar Painel</a></div>`);
-            }
+            let titulo = valor >= 59.00 ? "Painel de Revendedor Liberado! 🚀" : "Pagamento Confirmado! ✅";
+            let entregaHTML = valor >= 59.00 ? 
+                `<p><b>Login:</b> ${email}<br><b>Senha:</b> ${senha}<br><b>Painel:</b> <a href="https://control.zaplink.net/">Acessar Agora</a></p>` :
+                `<p>Sua licença foi gerada! Verifique seu e-mail: <b>${email}</b></p>
+                 <p style="color: red;"><b>Atenção:</b> Se não encontrar o e-mail, verifique a pasta de SPAM.</p>`;
 
-            console.log(`[SUCESSO] Buscando licença para o e-mail: ${email}`);
-            
-            // Espera 3 segundos para o webhook terminar de processar
-            await new Promise(resolve => setTimeout(resolve, 3000));
-
-            // TENTATIVA DE BUSCAR A LICENÇA
-            const zapResponse = await axios.post('https://control.zaplink.net/api/get_license', {
-                token: process.env.ZAPLINK_TOKEN.trim(),
-                email: email
-            }).catch(e => {
-                console.log("Erro ao chamar get_license:", e.response?.data || e.message);
-                return { data: {} };
-            });
-
-            console.log("Resposta da Zaplink na Busca:", JSON.stringify(zapResponse.data));
-
-            // Algumas APIs retornam 'license' ou 'license_key' ou dentro de um array
-            const licenseKey = zapResponse.data?.license_key || zapResponse.data?.license || "Aguardando ativação...";
-
-            if (licenseKey === "Aguardando ativação...") {
-                return res.send(`
-                    <div style="font-family:sans-serif;text-align:center;padding:50px;">
-                        <h1>Sua chave está sendo gerada...</h1>
-                        <p>Isso leva alguns segundos. Por favor, <b>atualize a página (F5)</b> em instantes.</p>
-                        <button onclick="location.reload()" style="padding:10px 20px; cursor:pointer;">ATUALIZAR PÁGINA</button>
-                    </div>
-                `);
-            }
-
-            res.send(`
-                <div style="font-family:sans-serif;text-align:center;padding:50px;">
-                    <h1 style="color:#198754;">Pagamento Aprovado! ✅</h1>
-                    <p>Sua chave de ativação:</p>
-                    <div style="background:#222;color:#0f0;padding:20px;border-radius:10px;display:inline-block;font-family:monospace;font-size:22px;border:2px solid #000;">
-                        <b>${licenseKey}</b>
-                    </div>
-                    <p>E-mail: ${email}</p>
-                    <br><a href="https://www.wasenderbrasil.me/p/download.html?" style="background:#0d6efd;color:white;padding:12px 25px;text-decoration:none;border-radius:5px;font-weight:bold;">BAIXAR AGORA</a>
-                </div>
-            `);
+            res.send(`<div style="font-family:sans-serif;text-align:center;padding:50px;">
+                <h1>${titulo}</h1>${entregaHTML}
+                <br><br><a href="https://www.wasenderbrasil.me/p/download.html?" style="background:#0d6efd;color:white;padding:10px 20px;text-decoration:none;border-radius:5px;">Ir para Download</a>
+            </div>`);
         } else {
-            res.send("<h1>Pagamento em análise...</h1>");
+            res.send("<h1>Pagamento em processamento...</h1>");
         }
-    } catch (e) {
-        console.error("Erro na rota sucesso:", e.message);
-        res.send("<h1>Sucesso!</h1><p>Sua licença foi processada. Verifique seu e-mail.</p>");
-    }
+    } catch (e) { res.send("<h1>Sucesso!</h1><p>Sua licença está sendo processada.</p>"); }
 });
 
-// 2. WEBHOOK (Criação) - MANTIDO IGUAL
+// 2. WEBHOOK (Processamento Automático)
 app.post('/webhook', async (req, res) => {
     res.sendStatus(200);
     const body = req.body;
+    
     if (body.topic === 'merchant_order' || body.action?.includes('order')) return;
 
     let idPagamento = null;
@@ -99,26 +58,27 @@ app.post('/webhook', async (req, res) => {
         });
 
         const p = mpResponse.data;
-        if (p.order?.type === 'mercadolibre' || p.status !== 'approved') return;
+        if (p.order?.type === 'mercadolibre') return;
 
-        const valor = p.transaction_amount;
-        let emailOriginal = (p.payer?.email || p.additional_info?.payer?.email || "").trim();
-        const email = (emailOriginal.includes('@')) ? emailOriginal : `cliente_${idPagamento}@mercadopago.com`;
-        const nome = p.payer?.first_name || "Cliente";
-        const senha = `Zap@${idPagamento.toString().slice(-4)}`;
+        if (p.status === 'approved') {
+            const valor = p.transaction_amount;
+            let emailOriginal = (p.payer?.email || p.additional_info?.payer?.email || "").trim();
+            const email = (emailOriginal.includes('@')) ? emailOriginal : `cliente_${idPagamento}@mercadopago.com`;
+            const nome = p.payer?.first_name || "Cliente";
+            const senha = `Zap@${idPagamento.toString().slice(-4)}`;
 
-        console.log(`[WEBHOOK] Criando licença para ${email}`);
+            console.log(`Pagamento Aprovado: R$ ${valor}. Enviando para Zaplink...`);
 
-        if (valor >= 239.00) await criarAdmin(email, nome, senha, 999999);
-        else if (valor >= 139.00) await criarAdmin(email, nome, senha, 50);
-        else if (valor >= 59.00) await criarAdmin(email, nome, senha, 10);
-        else if (valor >= 49.00) await gerarLicenca(email, nome, "VITALICIA");
-        else if (valor >= 0.01) await gerarLicenca(email, nome, "ANUAL");
-        
+            if (valor >= 239.00) await criarAdmin(email, nome, senha, 999999);
+            else if (valor >= 139.00) await criarAdmin(email, nome, senha, 50);
+            else if (valor >= 59.00) await criarAdmin(email, nome, senha, 10);
+            else if (valor >= 49.00) await gerarLicenca(email, nome, "VITALICIA");
+            else if (valor >= 0.01) await gerarLicenca(email, nome, "ANUAL");
+        }
     } catch (error) { console.error('Erro Webhook:', error.message); }
 });
 
-// FUNÇÕES ZAPLINK
+// 3. FUNÇÕES ZAPLINK
 async function criarAdmin(email, nome, senha, cota) {
     try {
         const res = await axios.post('https://control.zaplink.net/api/create_admin', {
@@ -126,19 +86,30 @@ async function criarAdmin(email, nome, senha, cota) {
             admin_email: email, admin_name: nome, admin_password: senha,
             admin_role: "admin", license_quota: cota, allowed_products: "waoriginal"
         });
-        console.log("ZAPLINK ADMIN:", res.data.message || "Criado");
-    } catch (e) { console.error("Erro Admin"); }
+        console.log("RESPOSTA ZAPLINK (Admin):", JSON.stringify(res.data));
+    } catch (e) { console.error("ERRO ZAPLINK (Admin):", e.response?.data || e.message); }
 }
 
 async function gerarLicenca(email, nome, tipo) {
     try {
+        // Se a Zaplink exigir o email em Base64 em algum momento, o ajuste seria aqui.
+        // Por enquanto, enviamos o email normal conforme o padrão da API de geração.
         const res = await axios.post('https://control.zaplink.net/api/generate_license', {
             token: process.env.ZAPLINK_TOKEN.trim(),
-            name: `${nome} (${tipo})`, email: email, product_id: "waoriginal"
+            name: `${nome} (${tipo})`, 
+            email: email, 
+            product_id: "waoriginal"
         });
-        console.log("ZAPLINK LICENÇA:", res.data.message || "Criado");
-    } catch (e) { console.error("Erro Licença"); }
+        
+        console.log(`RESPOSTA ZAPLINK (Licença para ${email}):`, JSON.stringify(res.data));
+        
+        if (res.data.status === true && res.data.license_key) {
+            console.log(`CHAVE GERADA: ${res.data.license_key}`);
+        }
+    } catch (e) { 
+        console.error("ERRO ZAPLINK (Licença):", e.response?.data || e.message); 
+    }
 }
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`Sistema Online!`));
+app.listen(PORT, () => console.log(`Servidor rodando e pronto!`));

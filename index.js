@@ -51,7 +51,7 @@ app.post('/webhook', async (req, res) => {
                     token: process.env.ZAPLINK_TOKEN,
                     name: nomeCliente,
                     email: emailFinal.trim(),
-                    product_id: "7774" // Já coloquei seu ID aqui baseado no padrão
+                    product_id: "waoriginal" // Já coloquei seu ID aqui baseado no padrão
                 });
                 console.log('Resposta da Zaplink:', resZaplink.data);
             } catch (zError) {

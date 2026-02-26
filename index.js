@@ -72,10 +72,11 @@ app.get('/sucesso', async (req, res) => {
     }
 });
 
-// 2. WEBHOOK (Criação automática na Zaplink)
+// 2. WEBHOOK (Criação automática na Zaplink com Filtro Anti-Mercado Livre)
 app.post('/webhook', async (req, res) => {
     res.sendStatus(200);
     const body = req.body;
+    
     const idPagamento = body.data?.id || (body.resource ? body.resource.split('/').pop() : null);
     if (!idPagamento || isNaN(idPagamento)) return;
 
@@ -85,14 +86,25 @@ app.post('/webhook', async (req, res) => {
         });
 
         const p = mpResponse.data;
+
+        // --- TRAVA DE SEGURANÇA: FILTRO MERCADO LIVRE ---
+        // Se a venda não tiver preference_id ou vier com referência de MLB, o código para aqui.
+        const eDoMercadoLivre = p.external_reference && p.external_reference.includes('MLB');
+        const semLinkDePagamento = !p.preference_id;
+
+        if (eDoMercadoLivre || semLinkDePagamento) {
+            console.log(`[FILTRO] Venda ignorada: Origem fora dos links de pagamento (ID: ${idPagamento})`);
+            return; 
+        }
+        // -----------------------------------------------
+
         if (p.status === 'approved') {
             const valor = p.transaction_amount;
             const email = (p.payer?.email || `cliente_${idPagamento}@mercadopago.com`).trim();
             const nome = p.payer?.first_name || "Cliente";
             const senha = `Zap@${idPagamento.toString().slice(-4)}`;
 
-            // --- REGRAS DE CRIAÇÃO POR VALOR ---
-            
+            // --- REGRAS DE CRIAÇÃO POR VALOR (PRODUÇÃO) ---
             if (valor >= 239.00) {
                 await criarAdmin(email, nome, senha, 999999);
                 entregasTemporarias[email] = { cota: "Ilimitada" };
@@ -107,8 +119,11 @@ app.post('/webhook', async (req, res) => {
                 const chave = await gerarLicenca(email, nome, tipo);
                 entregasTemporarias[email] = { chave: chave };
             }
+            console.log(`[WEBHOOK] Processado com sucesso: ${email}`);
         }
-    } catch (error) { console.error('Erro no processamento do Webhook'); }
+    } catch (error) { 
+        console.error('[ERRO WEBHOOK] Pagamento não encontrado ou erro na API'); 
+    }
 });
 
 // 3. FUNÇÕES DE APOIO ZAPLINK

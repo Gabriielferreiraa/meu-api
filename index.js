@@ -7,10 +7,10 @@ app.use(express.json());
 // Memória temporária para exibir os dados na tela de sucesso
 const entregasTemporarias = {};
 
-// 1. ROTA DE SUCESSO (O que o cliente vê após o pagamento)
+// 1. ROTA DE SUCESSO
 app.get('/sucesso', async (req, res) => {
     const idPagamento = req.query.payment_id || req.query.id;
-    console.log(`>>> [VISITA SUCESSO] Cliente chegou na página. ID: ${idPagamento}`);
+    console.log(`>>> [VISITA SUCESSO] ID: ${idPagamento}`);
 
     if (!idPagamento) return res.send("<h1>Aguardando confirmação...</h1>");
 
@@ -27,11 +27,11 @@ app.get('/sucesso', async (req, res) => {
 
             let dados = entregasTemporarias[email];
             if (!dados) {
-                await new Promise(r => setTimeout(r, 4000)); // Espera o webhook processar
+                await new Promise(r => setTimeout(r, 4000)); 
                 dados = entregasTemporarias[email];
             }
 
-            // --- TELA DE ADMIN / REVENDEDOR (VALOR >= R$ 59,00) ---
+            // --- TELA DE ADMIN / REVENDEDOR ---
             if (valor >= 59.00) { 
                 const cotaExibir = dados?.cota || "10";
                 return res.send(`
@@ -65,23 +65,19 @@ app.get('/sucesso', async (req, res) => {
                 </div>
             `);
         } else {
-            res.send("<h1>Pagamento em processamento...</h1><p>Atualize a página assim que o pagamento for aprovado.</p>");
+            res.send("<h1>Pagamento em processamento...</h1>");
         }
     } catch (e) {
-        console.log("!!! [ERRO TELA SUCESSO]:", e.message);
-        res.send("<h1>Processando...</h1><p>Verifique seu e-mail ou atualize a página em instantes.</p>");
+        res.send("<h1>Processando...</h1>");
     }
 });
 
-// 2. WEBHOOK (Processamento e Filtro Anti-Mercado Livre)
+// 2. WEBHOOK
 app.post('/webhook', async (req, res) => {
     res.sendStatus(200);
     const body = req.body;
-    
     const idPagamento = body.data?.id || (body.resource ? body.resource.split('/').pop() : null);
     if (!idPagamento || isNaN(idPagamento)) return;
-
-    console.log(`>>> [NOTIFICAÇÃO] Processando ID: ${idPagamento}`);
 
     try {
         const mpResponse = await axios.get(`https://api.mercadopago.com/v1/payments/${idPagamento}`, {
@@ -90,14 +86,11 @@ app.post('/webhook', async (req, res) => {
 
         const p = mpResponse.data;
 
-        // --- FILTRO INTELIGENTE MERCADO LIVRE ---
+        // FILTRO MERCADO LIVRE
         const eMercadoLivre = (p.external_reference && p.external_reference.includes('MLB')) || 
                               (p.order && p.order.type === 'mercadolibre');
 
-        if (eMercadoLivre) {
-            console.log(`!!! [FILTRO] Venda ignorada: Mercado Livre (ID: ${idPagamento})`);
-            return; 
-        }
+        if (eMercadoLivre) return;
 
         if (p.status === 'approved') {
             const valor = p.transaction_amount;
@@ -105,9 +98,6 @@ app.post('/webhook', async (req, res) => {
             const nome = p.payer?.first_name || "Cliente";
             const senha = `Zap@${idPagamento.toString().slice(-4)}`;
 
-            console.log(`>>> [APROVADO] Valor: R$ ${valor} | Email: ${email}`);
-
-            // --- LÓGICA DE CRIAÇÃO ---
             if (valor >= 239.00) {
                 await criarAdmin(email, nome, senha, 999999);
                 entregasTemporarias[email] = { cota: "Ilimitada" };
@@ -118,20 +108,17 @@ app.post('/webhook', async (req, res) => {
                 await criarAdmin(email, nome, senha, 10);
                 entregasTemporarias[email] = { cota: "10" };
             } else {
-                // SE VALOR >= 49.00 É VITALÍCIA (ENVIA EXPIRES_AT VAZIO)
                 const isVitalicia = valor >= 49.00;
                 const tipo = isVitalicia ? "VITALICIA" : "ANUAL";
-                const chave = await gerarLicenca(email, nome, tipo, isVitalicia ? "" : null);
+                // Envia data de 2999 se for vitalícia
+                const chave = await gerarLicenca(email, nome, tipo, isVitalicia ? "2999-12-31" : null);
                 entregasTemporarias[email] = { chave: chave };
             }
-            console.log(`>>> [OK] Processo finalizado com sucesso para ${email}`);
         }
-    } catch (error) { 
-        console.error('!!! [ERRO WEBHOOK]:', error.message); 
-    }
+    } catch (error) { console.error('Erro Webhook'); }
 });
 
-// 3. FUNÇÕES ZAPLINK (Com suporte a Vitalício)
+// 3. FUNÇÕES ZAPLINK
 async function criarAdmin(email, nome, senha, cota) {
     try {
         await axios.post('https://control.zaplink.net/api/create_admin', {
@@ -139,8 +126,7 @@ async function criarAdmin(email, nome, senha, cota) {
             admin_email: email, admin_name: nome, admin_password: senha,
             admin_role: "admin", license_quota: cota, allowed_products: "waoriginal"
         });
-        console.log(`[ZAPLINK] Admin ${email} criado.`);
-    } catch (e) { console.error('[ZAPLINK ADMIN]', e.response?.data || e.message); }
+    } catch (e) { console.error('Erro Admin'); }
 }
 
 async function gerarLicenca(email, nome, tipo, expiracao) {
@@ -152,19 +138,17 @@ async function gerarLicenca(email, nome, tipo, expiracao) {
             product_id: "waoriginal"
         };
 
-        // Se expiracao for "" (vitalício), adiciona ao envio para o Zaplink
-        if (expiracao !== null) {
+        // Adiciona a expiração longa (2999) para vitalício
+        if (expiracao) {
             dadosApi.expires_at = expiracao;
         }
 
         const res = await axios.post('https://control.zaplink.net/api/generate_license', dadosApi);
-        console.log(`[ZAPLINK] Licença ${tipo} gerada para ${email}`);
         return res.data.license_code || res.data.license_key;
     } catch (e) { 
-        console.error('[ZAPLINK LICENÇA]', e.response?.data || e.message);
         return "Erro na geração automática";
     }
 }
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`Sistema de Produção Online!`));
+app.listen(PORT, () => console.log(`Sistema Online - Vitalício configurado para o ano 2999`));

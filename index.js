@@ -61,7 +61,7 @@ app.get('/sucesso', async (req, res) => {
                     <p>E-mail de ativação: <b>${email}</b></p>
                     <br><br>
                     <a href="https://www.wasenderbrasil.me/p/download.html?" style="background:#0d6efd;color:white;padding:12px 25px;text-decoration:none;border-radius:5px;font-weight:bold;">BAIXAR INSTALADOR</a>
-                    <p style="margin-top:20px;"><button onclick="location.reload()" style="cursor:pointer;padding:8px 15px;">Ver minha chave</button></p>
+                    <a href="https://wa.me/5567993502476" target="_blank" style="margin-top: 20px;"><button style="cursor: pointer; padding: 8px 15px;">Não apareceu? Me Chame no Zap!</button></a>
                 </div>
             `);
         } else {

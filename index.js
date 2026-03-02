@@ -7,10 +7,10 @@ app.use(express.json());
 // Memória temporária para exibir os dados na tela de sucesso
 const entregasTemporarias = {};
 
-// 1. ROTA DE SUCESSO
+// 1. ROTA DE SUCESSO (O que o cliente vê após pagar)
 app.get('/sucesso', async (req, res) => {
     const idPagamento = req.query.payment_id || req.query.id;
-    console.log(`>>> [VISITA SUCESSO] ID: ${idPagamento}`);
+    console.log(`>>> [VISITA SUCESSO] Cliente na página. ID: ${idPagamento}`);
 
     if (!idPagamento) return res.send("<h1>Aguardando confirmação...</h1>");
 
@@ -72,7 +72,7 @@ app.get('/sucesso', async (req, res) => {
     }
 });
 
-// 2. WEBHOOK
+// 2. WEBHOOK (Processamento e Filtros de Segurança)
 app.post('/webhook', async (req, res) => {
     res.sendStatus(200);
     const body = req.body;
@@ -86,17 +86,29 @@ app.post('/webhook', async (req, res) => {
 
         const p = mpResponse.data;
 
-        // FILTRO MERCADO LIVRE
+        // --- TRAVA ANTI-COFRINHO / INVESTIMENTO ---
+        // Se não for um pagamento regular (venda), o código ignora.
+        if (p.operation_type !== 'regular_payment') {
+            console.log(`>>> [FILTRO] Operação ignorada (Cofrinho/Interno): ${p.operation_type}`);
+            return;
+        }
+
+        // --- TRAVA ANTI-MERCADO LIVRE ---
         const eMercadoLivre = (p.external_reference && p.external_reference.includes('MLB')) || 
                               (p.order && p.order.type === 'mercadolibre');
 
-        if (eMercadoLivre) return;
+        if (eMercadoLivre) {
+            console.log(`>>> [FILTRO] Venda ignorada (Mercado Livre): ${idPagamento}`);
+            return;
+        }
 
         if (p.status === 'approved') {
             const valor = p.transaction_amount;
             const email = (p.payer?.email || `cliente_${idPagamento}@mercadopago.com`).trim();
             const nome = p.payer?.first_name || "Cliente";
             const senha = `Zap@${idPagamento.toString().slice(-4)}`;
+
+            console.log(`>>> [PROCESSANDO] Valor: R$ ${valor} | Email: ${email}`);
 
             if (valor >= 239.00) {
                 await criarAdmin(email, nome, senha, 999999);
@@ -110,12 +122,14 @@ app.post('/webhook', async (req, res) => {
             } else {
                 const isVitalicia = valor >= 49.00;
                 const tipo = isVitalicia ? "VITALICIA" : "ANUAL";
-                // Envia data de 2999 se for vitalícia
+                // Envia data de 2999 se for vitalícia (R$ 49,00+)
                 const chave = await gerarLicenca(email, nome, tipo, isVitalicia ? "2999-12-31" : null);
                 entregasTemporarias[email] = { chave: chave };
             }
         }
-    } catch (error) { console.error('Erro Webhook'); }
+    } catch (error) { 
+        console.error('!!! [ERRO WEBHOOK]:', error.message); 
+    }
 });
 
 // 3. FUNÇÕES ZAPLINK
@@ -138,7 +152,6 @@ async function gerarLicenca(email, nome, tipo, expiracao) {
             product_id: "waoriginal"
         };
 
-        // Adiciona a expiração longa (2999) para vitalício
         if (expiracao) {
             dadosApi.expires_at = expiracao;
         }
@@ -146,9 +159,10 @@ async function gerarLicenca(email, nome, tipo, expiracao) {
         const res = await axios.post('https://control.zaplink.net/api/generate_license', dadosApi);
         return res.data.license_code || res.data.license_key;
     } catch (e) { 
+        console.error('Erro Licença');
         return "Erro na geração automática";
     }
 }
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`Sistema Online - Vitalício configurado para o ano 2999`));
+app.listen(PORT, () => console.log(`Sistema 100% Protegido (Filtros: ML, Cofrinho e Vitalício 2999)`));

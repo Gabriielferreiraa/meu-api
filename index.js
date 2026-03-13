@@ -32,7 +32,7 @@ app.get('/sucesso', async (req, res) => {
             }
 
             // --- TELA DE ADMIN / REVENDEDOR ---
-            if (valor >= 59.00) { 
+            if (valor >= 69.00) { 
                 const cotaExibir = dados?.cota || "10";
                 return res.send(`
                     <div style="font-family:sans-serif;text-align:center;padding:50px;line-height:1.6;">
@@ -111,19 +111,19 @@ app.post('/webhook', async (req, res) => {
             console.log(`>>> [PROCESSANDO] Valor: R$ ${valor} | Email: ${email}`);
 
             if (valor >= 239.00) {
-                await criarAdmin(email, nome, senha, 999999);
+                await criarAdmin(email, nome, senha, 999);
                 entregasTemporarias[email] = { cota: "Ilimitada" };
             } else if (valor >= 139.00) {
-                await criarAdmin(email, nome, senha, 50);
-                entregasTemporarias[email] = { cota: "50" };
-            } else if (valor >= 59.00) {
+                await criarAdmin(email, nome, senha, 25);
+                entregasTemporarias[email] = { cota: "25" };
+            } else if (valor >= 69.00) {
                 await criarAdmin(email, nome, senha, 10);
                 entregasTemporarias[email] = { cota: "10" };
             } else {
-                const isVitalicia = valor >= 49.00;
+                const isVitalicia = valor >= 59.00;
                 const tipo = isVitalicia ? "VITALICIA" : "ANUAL";
-                // Envia data de 2999 se for vitalícia (R$ 49,00+)
-                const chave = await gerarLicenca(email, nome, tipo, isVitalicia ? "2999-12-31" : null);
+                // Envia data de 2999 se for vitalícia (R$ 59,00+)
+                const chave = await gerarLicenca(email, nome, tipo, isVitalicia ? "31-12-2050" : null);
                 entregasTemporarias[email] = { chave: chave };
             }
         }
